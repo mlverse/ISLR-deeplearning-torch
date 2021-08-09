@@ -16,23 +16,15 @@ jupyter:
 
 # Lab: Deep Learning
 
-In this section, we show how to fit the examples discussed in the text. We use the `keras` package, which interfaces to the
-`tensorflow` package which in turn links to efficient
-`python` code. This code is
+In this section, we show how to fit the examples discussed in the text. We use the `luz` package, which interfaces to the
+`torch` package which in turn links to efficient
+`C++` code in the LibTorch library. This code is
 impressively fast, and the package is well-structured. A good companion
 is the text **Deep Learning with R**
 (F. Chollet and
   J.J. Allaire, \emph{Deep Learning with R}
   (2018), Manning Publications,) and most of our code is adapted from
 there.
-
-Getting `keras` up and running on your computer can be a
-challenge.  The book website [www.statlearning.com](www.statlearning.com) gives
-step-by-step instructions on how to achieve this.
-(Many thanks to Balasubramanian Narasimhan for preparing the `keras`
-installation instructions.)
-Guidance can also be found at [keras.rstudio.com](keras.rstudio.com))
-
 
 ## Single Layer Network on Hitters Data
 
@@ -90,25 +82,35 @@ To fit the neural network, we first set up a model structure
 that describes the network.
 
 ```{r}
-library(keras)
+library(luz)
+library(torch)
 ```
 
 ```{r}
-modnn <- keras_model_sequential() %>%
-     layer_dense(units = 50, activation = "relu",
-        input_shape = ncol(x)) %>%
-     layer_dropout(rate = 0.4) %>%
-     layer_dense(units = 1)
+modnn <- nn_module(
+  initialize = function(input_size) {
+    self$hidden <- nn_linear(input_size, 50)
+    self$activation <- nn_relu()
+    self$dropout <- nn_dropout(0.4)
+    self$output <- nn_linear(50, 1)
+  },
+  forward = function(x) {
+    x %>% 
+      self$hidden() %>% 
+      self$activation() %>% 
+      self$dropout() %>% 
+      self$output()
+  }
+)
 ```
 
-We have created a vanilla model
-object called `modnn`, and have added details about the successive
-layers in a sequential manner, using the function `keras_model_sequential()`.
+We have create a model called `modnn` by defining the `initialize` and `forward` functions and passing them to the `nn_module()` function. The `initialize` function is responsible for initializing the submodules that are used by the model. In the `forward` method we implement what happens when call that model with observations. In this case we use the layers we defined in `initialize` in that specific order.
+
+`self` is a list-like special object that is is used to share information between the methods of the `nn_module`. When you assign an object to `self` in `initialize`, it can then be accessed by `forward`.
+
 The `pipe` operator `%>%`
  passes the previous term as the first argument to the next
 function, and returns the result.
-It allows us to specify the layers of
-a neural network in a readable form.
 
 We illustrate the use of the pipe operator on a simple example. Earlier, we created `x` using the command
 
@@ -133,26 +135,22 @@ algorithm. Finally, the output layer has just one unit with no
 activation function, indicating that the model provides a single
 quantitative output.
 
-
 Next we add details to  `modnn` that control the fitting
-algorithm. Here we have simply followed the examples given in
-the Keras book. We minimize squared-error loss as in
+algorithm. We minimize squared-error loss as in
 (10.22). The algorithm
 tracks the mean absolute error on the training data, and
 on validation data if it is supplied.
 
 ```{r}
-modnn %>% compile(loss = "mse",
-    optimizer = optimizer_rmsprop(),
-    metrics = list("mean_absolute_error")
-   )
+modnn <- modnn %>% setup(
+  loss = nn_mse_loss(),
+  optimizer = optim_rmsprop,
+  metrics = list(luz_metric_mse())
+)
 ```
 
 
-In the previous line, the pipe operator passes `modnn` as the first argument to `compile()`. The `compile()` function does not actually change the `R`
-object `modnn`, but it does communicate these specifications to
-the corresponding `python` instance of this model that has been created
-along the way.
+In the previous line, the pipe operator passes `modnn` as the first argument to `setup()`. The `setup()` function emmbedes these specification into a new model object.
 
 Now we fit the model. We supply the training data and  two
 fitting parameters, `epochs` and `batch\_size`. Using 32
@@ -167,7 +165,7 @@ but can be used to track the progress of the model (in this case reporting
 mean absolute error). Here we
 actually supply the test data so we can see mean absolute error of both the
 training data and test data as the epochs proceed. To see more options
-for fitting, use `?fit.keras.engine.training.Model`.
+for fitting, use `?fit.luz_module_generator`.
 
 ```{r}
 history <- modnn %>% fit(
