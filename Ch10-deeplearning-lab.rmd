@@ -84,6 +84,7 @@ that describes the network.
 ```{r}
 library(luz)
 library(torch)
+torch_manual_seed(13)
 ```
 
 ```{r}
@@ -142,25 +143,27 @@ tracks the mean absolute error on the training data, and
 on validation data if it is supplied.
 
 ```{r}
-modnn <- modnn %>% setup(
-  loss = nn_mse_loss(),
-  optimizer = optim_rmsprop,
-  metrics = list(luz_metric_mse())
-)
+modnn <- modnn %>% 
+  setup(
+    loss = nn_mse_loss(),
+    optimizer = optim_rmsprop,
+    metrics = list(luz_metric_mse())
+  ) %>% 
+  set_hparams(input_size = ncol(x))
 ```
 
+In the previous line, the pipe operator passes `modnn` as the first argument to `setup()`. 
+The `setup()` function emmbeds these specification into a new model object. 
+We also use the `set_hparam` to specify the arguments that should be passed to the 
+`initialize` method of `modnn`. 
 
-In the previous line, the pipe operator passes `modnn` as the first argument to `setup()`. The `setup()` function emmbedes these specification into a new model object.
-
-Now we fit the model. We supply the training data and  two
-fitting parameters, `epochs` and `batch\_size`. Using 32
-for the latter means that at each step of SGD, the algorithm randomly
-selects 32 training observations for the computation of the gradient. Recall from
-Sections 10.4 and 10.7
+Now we fit the model. We supply the training data and the number of `epochs`. By default,
+at each step of SGD, the algorithm randomly selects 32 training observations for 
+the computation of the gradient. Recall from Sections 10.4 and 10.7
 that an epoch amounts to the number of SGD steps required to process $n$
 observations. Since the training set has
 $n=176$, an epoch is $176/32=5.5$ SGD steps. The `fit()` function has an argument
-`validation_data`; these data are not used in the fitting,
+`valid_data`; these data are not used in the fitting,
 but can be used to track the progress of the model (in this case reporting
 mean absolute error). Here we
 actually supply the test data so we can see mean absolute error of both the
@@ -168,30 +171,28 @@ training data and test data as the epochs proceed. To see more options
 for fitting, use `?fit.luz_module_generator`.
 
 ```{r}
-history <- modnn %>% fit(
-#    x[-testid, ], y[-testid], epochs = 1500, batch_size = 32,
-     x[-testid, ], y[-testid], epochs = 600, batch_size = 32,
-    validation_data = list(x[testid, ], y[testid])
+fitted <- modnn %>% 
+  fit(
+    data = list(x[-testid, ], matrix(y[-testid], ncol = 1)),
+    valid_data = list(x[testid, ], matrix(y[testid], ncol = 1)),
+    epochs = 20
   )
 ```
 *(Here and elsewhere we have reduced the number of epochs to make
     runtimes manageable; users can of course change back)*
 
-We can plot the `history` to display the mean absolute error for the training and test data. For the best aesthetics, install the `ggplot2` package before calling the  `plot()` function. If you have not installed `ggplot2`, then the code below will still run, but the plot will be less attractive.
+We can plot the `fiited` model to display the mean absolute error for the training and test data. 
 
 ```{r}
-plot(history)
+plot(fitted)
 ```
-
-It is worth noting that if you run the `fit()` command a second time in the same `R` session, then the fitting process will pick up where it left off. Try re-running the `fit()` command, and then the `plot()` command, to see!
 
 Finally, we predict from the final model, and
 evaluate its performance on the test data. Due to the use of SGD, the results vary slightly with each
-fit. Unfortunately the `set.seed()` function does not ensure
-identical results (since the fitting is done in `python`), so your results will differ slightly.
+fit. 
 
 ```{r}
-npred <- predict(modnn, x[testid, ])
+npred <- predict(fitted, x[testid, ])
 mean(abs(y[testid] - npred))
 ```
 
