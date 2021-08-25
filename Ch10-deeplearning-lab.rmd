@@ -82,8 +82,9 @@ To fit the neural network, we first set up a model structure
 that describes the network.
 
 ```{r}
-library(luz)
 library(torch)
+library(luz) # high-level interface for torch
+library(torchvision) # for datasets we are going to use
 torch_manual_seed(13)
 ```
 
@@ -198,31 +199,27 @@ mean(abs(y[testid] - npred))
 
 ## Multilayer Network on the MNIST Digit Data
 
-The `keras` package comes with a number of example datasets,
+The `torchvision` package comes with a number of example datasets,
 including the `MNIST` digit data. Our first step is to load the
-`MNIST` data. The `dataset_mnist()` function is provided for this purpose.
+`MNIST` data. The `mnist_dataset()` function is provided for this purpose.
+
+This functions returns a `dataset`, a data structure implemented in `torch`
+allowing to represent any dataset without making assumptions on where and
+how the data is organized. Usually, torch datasets also implement the 
+data acquisition process, like downloading and caching some files on disk.
 
 ```{r}
-mnist <- dataset_mnist()
-x_train <- mnist$train$x
-g_train <- mnist$train$y
-x_test <- mnist$test$x
-g_test <- mnist$test$y
-dim(x_train)
-dim(x_test)
+train_ds <- mnist_dataset(root = ".", train = TRUE, download = TRUE)
+test_ds <- mnist_dataset(root = ".", train = FALSE, download = TRUE)
+
+str(train_ds[1])
+str(test_ds[2])
+
+length(train_ds)
+length(test_ds)
 ```
 
-There are 60,000 images in the training data and 10,000 in the test data. The images are $28\times 28$, and stored as a three-dimensional array,
-so we need to reshape them into a matrix.  Also, we need to ``one-hot''
-encode the class label. Luckily `keras` has a lot of built-in
-functions that do this for us.
-
-```{r}
-x_train <- array_reshape(x_train, c(nrow(x_train), 784))
-x_test <- array_reshape(x_test, c(nrow(x_test), 784))
-y_train <- to_categorical(g_train, 10)
-y_test <- to_categorical(g_test, 10)
-```
+There are 60,000 images in the training data and 10,000 in the test data. The images are $28\times 28$, and stored as matrix of pixels and we need to transform each one into a vector.  
 
 Neural networks are somewhat sensitive to the scale of the inputs. For example, ridge and
 lasso regularization are affected by scaling.  Here the inputs are eight-bit
@@ -231,59 +228,98 @@ is to start at $0$, the possible values  range from $0$ to $255$.)
 grayscale values between 0 and 255, so we rescale to the unit
 interval.
 
+To make this transformations we will re-define `train_ds` and `test_ds` but now passing the `transform` argument that will apply a transformation for each of
+the image inputs.
+
 ```{r}
-x_train <- x_train / 255
-x_test <- x_test / 255
+transform <- function(x) {
+  x %>% 
+    torch_tensor() %>% 
+    torch_flatten() %>% 
+    torch_div(255)
+}
+train_ds <- mnist_dataset(
+  root = ".", 
+  train = TRUE, 
+  download = TRUE, 
+  transform = transform
+)
+test_ds <- mnist_dataset(
+  root = ".", 
+  train = FALSE, 
+  download = TRUE,
+  transform = transform
+)
 ```
 
 Now we are ready to fit our neural network.
 
 ```{r}
-modelnn <- keras_model_sequential()
-modelnn %>%
-   layer_dense(units = 256, activation = "relu",
-       input_shape = c(784)) %>%
-   layer_dropout(rate = 0.4) %>%
-   layer_dense(units = 128, activation = "relu") %>%
-   layer_dropout(rate = 0.3) %>%
-   layer_dense(units = 10, activation = "softmax")
+modelnn <- nn_module(
+  initialize = function() {
+    self$linear1 <- nn_linear(in_features = 28*28, out_features = 256)
+    self$linear2 <- nn_linear(in_features = 256, out_features = 128)
+    self$linear3 <- nn_linear(in_features = 128, out_features = 10)
+    
+    self$drop1 <- nn_dropout(p = 0.4)
+    self$drop2 <- nn_dropout(p = 0.3)
+    
+    self$activation <- nn_relu()
+  },
+  forward = function(x) {
+    x %>% 
+      
+      self$linear1() %>% 
+      self$activation() %>% 
+      self$drop1() %>% 
+      
+      self$linear2() %>% 
+      self$activation() %>% 
+      self$drop2() %>% 
+      
+      self$linear3()
+  }
+)
 ```
 
-The first layer goes from  $28\times28=784$ input units to a hidden
-layer of $256$ units, which uses the ReLU activation function.
-This is specified by a call to `layer\_dense()`, which takes as
-input a `modelnn` object, and returns a modified `modelnn`
-object.
-This is then piped through `layer\_dropout()` to perform
-dropout regularization. The second hidden layer comes
-next, with $128$ hidden units, followed by a  dropout layer.
-The final layer is the output layer, with activation
-`"softmax"` (10.12) for the 10-class classification
-problem, which defines the map from the second hidden layer to class
-probabilities.
-Finally, we use `summary()` to summarize the model, and to make sure we got it
+We define the `intialize` and `forward` methods of the `nn_module()`.
+
+In `initialize` we specify all layers that are used in the model.
+For example `nn_linear(784, 256)` defines a dense layer that goes from
+$28\times28=784$ input units to a hidden layer of $256$ units. The model
+will have 3 of them, each one descreasing the number of output units. The last,
+will have 10 output units, because each unit will be associtated to a different
+class and we have a 10-class classification problem.
+We also defined dropout layers using `nn_dropout()` that will be used
+to perform dropout regularization. And finally we define the activation
+layer using `nn_relu()`.
+
+In `forward` we define the order that these layers are called. We call them in blocks like (linear, activation, dropout) except from the last layer that we don't
+use an activation function or dropout.
+
+Finally, we use `print` to summarize the model, and to make sure we got it
 all right.
 
 ```{r}
-summary(modelnn)
+print(modelnn())
 ```
 
 The parameters for each layer include a bias term, which results in a
 parameter count of 235,146. For example, the first hidden
 layer involves $(784+1)\times 256=200{,}960$ parameters.
 
-Notice that the layer names such as `dropout_1` and
-`dense_2` have subscripts. These may appear somewhat random; in
-fact, if you fit the same model again, these will change. They are of
-no consequence: they vary because the model
-specification code is run in `python`, and these subscripts are incremented every time
-`keras_model_sequential()` is called.
-
 Next, we add details to the model to specify the fitting algorithm. We fit the model by minimizing the cross-entropy function given by (10.13).
 
+Notice that in `torch` the cross entropy function is defined in terms of 
+the logits for numerical stability reasons and for memory efficiency reasons
+it doesn't require the target to be one hot encoded.
+
 ```{r}
-modelnn %>% compile(loss = "categorical_crossentropy",
-    optimizer = optimizer_rmsprop(), metrics = c("accuracy")
+modelnn <- modelnn %>% 
+  setup(
+    loss = nn_cross_entropy_loss(),
+    optimizer = optim_rmsprop, 
+    metrics = list(luz_metric_accuracy())
   )
 ```
 
@@ -291,26 +327,30 @@ Now we are ready to go. The final step is to supply training data, and fit the m
 
 ```{r}
 system.time(
-   history <- modelnn %>%
-#     fit(x_train, y_train, epochs = 30, batch_size = 128,
-      fit(x_train, y_train, epochs = 15, batch_size = 128,
-        validation_split = 0.2)
+   fitted <- modelnn %>%
+      fit(
+        data = train_ds, 
+        epochs = 5,
+        valid_data = 0.2,
+        dataloader_options = list(batch_size = 256),
+        verbose = FALSE
+      )
  )
-plot(history, smooth = FALSE)
+plot(fitted)
 ```
 
 We have suppressed the output here, which is a progress report on the
 fitting of the model, grouped by epoch. This is very useful, since on
-large datasets fitting can take time. Fitting this model took 144
-seconds on a 2.9GHz MacBook Pro with 4 cores and 32 GB of RAM.
+large datasets fitting can take time. Fitting this model took 215
+seconds on a 2.7GHz MacBook Pro with 4 cores and 16 GB of RAM.
 Here we specified a
 validation split of 20%, so the training is actually performed on
 80% of the 60,000 observations in the training set. This is an
 alternative to actually supplying validation data, like we did in
 Section 10.9.1. See
-`?fit.keras.engine.training.Model` for all the optional fitting arguments. SGD  uses batches
-of 128 observations in computing the gradient, and doing the
-arithmetic, we see that an epoch corresponds to 375 gradient steps.
+`?fit.luz_module_generator` for all the optional fitting arguments. SGD  uses batches
+of 256 observations in computing the gradient, and doing the
+arithmetic, we see that an epoch corresponds to 188 gradient steps.
 The last `plot()` command produces a figure similar to Figure 10.18.
 
 To obtain the test error in Table 10.1, we first write
