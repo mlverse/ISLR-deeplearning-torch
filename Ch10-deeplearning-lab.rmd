@@ -359,31 +359,57 @@ class labels, and then use it to evaluate our predictions.
 
 ```{r}
 accuracy <- function(pred, truth) {
-   mean(drop(pred) == drop(truth)) }
-modelnn %>% predict_classes(x_test) %>% accuracy(g_test)
+   mean(pred == truth) }
+
+# get's the true classes from all observations in test_ds.
+truth <- sapply(seq_along(test_ds), function(x) test_ds[x][[2]])
+
+fitted %>% 
+  predict(test_ds) %>% 
+  torch_argmax(dim = 2) %>%  # the predicted class is the one with higher 'logit'.
+  as_array() %>% # we convert to an R object
+  accuracy(truth)
 ```
 
 The table also reports LDA (Chapter 4) and multiclass logistic
 regression. Although packages such as `glmnet` can handle
 multiclass logistic regression, they are quite slow on this large
 dataset. It is much faster and quite easy to fit such a model
-using the `keras` software. We just have an input layer and output layer, and omit the hidden layers!
+using the `luz` software. We just have an input layer and output layer, and omit the hidden layers!
 
 ```{r}
-modellr <- keras_model_sequential() %>%
-   layer_dense(input_shape = 784, units = 10,
-       activation = "softmax")
-summary(modellr)
+modellr <- nn_module(
+  initialize = function() {
+    self$linear <- nn_linear(784, 10)
+  },
+  forward = function(x) {
+    self$linear(x)
+  }
+)
+print(modellr())
 ```
 
 We fit the model just as before.
 
 ```{r}
-modellr %>% compile(loss = "categorical_crossentropy",
-     optimizer = optimizer_rmsprop(), metrics = c("accuracy"))
-modellr %>% fit(x_train, y_train, epochs = 30,
-      batch_size = 128, validation_split = 0.2)
-modellr %>% predict_classes(x_test) %>% accuracy(g_test)
+fit_modellr <- modellr %>% 
+  setup(
+    loss = nn_cross_entropy_loss(),
+    optimizer = optim_rmsprop,
+    metrics = list(luz_metric_accuracy())
+  ) %>% 
+  fit(
+    data = train_ds, 
+    epochs = 5,
+    valid_data = 0.2,
+    dataloader_options = list(batch_size = 128)
+  )
+
+fit_modellr %>% 
+  predict(test_ds) %>% 
+  torch_argmax(dim = 2) %>%  # the predicted class is the one with higher 'logit'.
+  as_array() %>% # we convert to an R object
+  accuracy(truth)
 ```
 
 ### Convolutional Neural Networks
