@@ -410,45 +410,52 @@ fit_modellr %>%
   torch_argmax(dim = 2) %>%  # the predicted class is the one with higher 'logit'.
   as_array() %>% # we convert to an R object
   accuracy(truth)
+
+
+# alternatively one can use the `evaluate` function to get the results
+# in the test_ds
+evaluate(fit_modellr, test_ds)
 ```
 
 ### Convolutional Neural Networks
 
-In this section we fit a CNN to the `CIFAR` data, which is available in the `keras`
+In this section we fit a CNN to the `CIFAR` data, which is available in the `torchvision`
 package. It is arranged in a similar fashion as the `MNIST` data.
 
 ```{r}
-cifar100 <- dataset_cifar100()
-names(cifar100)
-x_train <- cifar100$train$x
-g_train <- cifar100$train$y
-x_test <- cifar100$test$x
-g_test <- cifar100$test$y
-dim(x_train)
-range(x_train[1,,, 1])
+transform <- function(x) {
+  transform_to_tensor(x)
+}
+
+train_ds <- cifar100_dataset(
+  root = "./", 
+  train = TRUE, 
+  download = TRUE, 
+  transform = transform
+)
+
+test_ds <- cifar100_dataset(
+  root = "./", 
+  train = FALSE, 
+  transform = transform
+)
+
+str(train_ds[1])
+length(train_ds)
 ```
 
-The array of 50,000 training images has four dimensions:
-  each three-color image is represented as a set of three channels, each of which consists of
+The CIFAR dataset consists of 50,000 training images each represented by a 3d tensor:
+each three-color image is represented as a set of three channels, each of which consists of
 $32\times 32$ eight-bit pixels. We standardize as we did for the
-digits, but keep the array structure. We one-hot encode the response
-factors  to produce a 100-column binary matrix.
+digits, but keep the array structure, this is accomplished with the `transform` argument.
 
-```{r}
-x_train <- x_train / 255
-x_test <- x_test / 255
-y_train <- to_categorical(g_train, 100)
-dim(y_train)
-```
-
-Before we start, we look at some of the training images using  the `jpeg` package; similar code produced
+Before we start, we look at some of the training images; similar code produced
 Figure 10.5 on page 411.
 
 ```{r}
-library(jpeg)
 par(mar = c(0, 0, 0, 0), mfrow = c(5, 5))
 index <- sample(seq(50000), 25)
-for (i in index) plot(as.raster(x_train[i,,, ]))
+for (i in index) plot(as.raster(as.array(train_ds[i][[1]]$permute(c(2,3,1)))))
 ```
 
 The `as.raster()` function converts the feature map so that it can be plotted as a color image.
@@ -457,29 +464,52 @@ Here we specify a moderately-sized  CNN for
 demonstration purposes, similar in structure to Figure 10.8.
 
 ```{r}
-model <- keras_model_sequential() %>%
-   layer_conv_2d(filters = 32, kernel_size = c(3, 3),
-      padding = "same", activation = "relu",
-      input_shape = c(32, 32, 3)) %>%
-   layer_max_pooling_2d(pool_size = c(2, 2)) %>%
-   layer_conv_2d(filters = 64, kernel_size = c(3, 3),
-      padding = "same", activation = "relu") %>%
-   layer_max_pooling_2d(pool_size = c(2, 2)) %>%
-   layer_conv_2d(filters = 128, kernel_size = c(3, 3),
-      padding = "same", activation = "relu") %>%
-   layer_max_pooling_2d(pool_size = c(2, 2)) %>%
-   layer_conv_2d(filters = 256, kernel_size = c(3, 3),
-      padding = "same", activation = "relu") %>%
-   layer_max_pooling_2d(pool_size = c(2, 2)) %>%
-   layer_flatten() %>%
-   layer_dropout(rate = 0.5) %>%
-   layer_dense(units = 512, activation = "relu") %>%
-   layer_dense(units = 100, activation = "softmax")
-summary(model)
+conv_block <- nn_module(
+  initialize = function(in_channels, out_channels) {
+    self$conv <- nn_conv2d(
+      in_channels = in_channels, 
+      out_channels = out_channels, 
+      kernel_size = c(3,3), 
+      padding = "same"
+    )
+    self$relu <- nn_relu()
+    self$pool <- nn_max_pool2d(kernel_size = c(2,2))
+  },
+  forward = function(x) {
+    x %>% 
+      self$conv() %>% 
+      self$relu() %>% 
+      self$pool()
+  }
+)
+
+model <- nn_module(
+  initialize = function() {
+    self$conv <- nn_sequential(
+      conv_block(3, 32),
+      conv_block(32, 64),
+      conv_block(64, 128),
+      conv_block(128, 256)
+    )
+    self$output <- nn_sequential(
+      nn_dropout(0.5),
+      nn_linear(2*2*256, 512),
+      nn_relu(),
+      nn_linear(512, 100)
+    )
+  },
+  forward = function(x) {
+    x %>% 
+      self$conv() %>% 
+      torch_flatten(start_dim = 2) %>% 
+      self$output()
+  }
+)
+model()
 ```
 
 Notice that we used the `padding = "same"` argument to
-`layer_conv_2D()`, which ensures that the output channels have the
+`nn_conv2d`, which ensures that the output channels have the
 same dimension as the input channels. There are 32 channels in the first
 hidden layer, in contrast to the three channels in the input layer. We
 use a $3\times 3$ convolution filter for each channel in all the layers. Each
@@ -492,21 +522,32 @@ flattened to a dense layer of size 1,024:
 in other words, each of the $2\times 2$ matrices is turned into a
 $4$-vector, and put side-by-side in one layer. This is followed by a
 dropout regularization layer,  then
-another dense layer of size 512, which finally reaches the softmax
+another dense layer of size 512, which finally reaches
 output layer.
 
 Finally, we specify the fitting algorithm, and fit the model.
 
 ```{r}
-model %>% compile(loss = "categorical_crossentropy",
-    optimizer = optimizer_rmsprop(), metrics = c("accuracy"))
-#history <- model %>% fit(x_train, y_train, epochs = 30,
-history <- model %>% fit(x_train, y_train, epochs = 10,
-    batch_size = 128, validation_split = 0.2)
-model %>% predict_classes(x_test) %>% accuracy(g_test)
+fitted <- model %>% 
+  setup(
+    loss = nn_cross_entropy_loss(),
+    optimizer = optim_rmsprop, 
+    metrics = list(luz_metric_accuracy())
+  ) %>% 
+  set_opt_hparams(lr = 0.001) %>% 
+  fit(
+    train_ds,
+    epochs = 10, #30,
+    valid_data = 0.2,
+    dataloader_options = list(batch_size = 128)
+  )
+
+print(fitted)
+
+evaluate(fitted, test_ds)
 ```
 
-This model takes 10 minutes to run and achieves 46% accuracy on the test
+This model takes 10 minutes to run and achieves 36% accuracy on the test
 data. Although this is not terrible for 100-class data (a random
 classifier gets 1% accuracy), searching the web we see results around
 75%. Typically it takes a lot of architecture carpentry,
@@ -524,6 +565,19 @@ convert them into the array format expected by the `keras`
 software to match the specifications in `imagenet`. Make sure that your working directory in `R` is set to the folder in which the images are stored.
 
 ```{r}
+book_images_dataset <- dataset(
+  initialize = function(root, train = TRUE) {
+    fpath <- path.expand(file.path(root, "book_images.zip"))
+    
+    download.file(
+      url = "https://www.statlearning.com/s/book_images.zip", 
+      fpath
+    )
+    
+    unzip(fpath, exdir = path.expand(root))
+  }
+)
+
 img_dir <- "book_images"
 image_names <- list.files(img_dir)
 num_images <- length(image_names)

@@ -3,3 +3,7 @@
 .RData
 .Ruserdata
 mnist
+original.Rmd
+book_images
+book_images.zip
+cifar-100-binary
