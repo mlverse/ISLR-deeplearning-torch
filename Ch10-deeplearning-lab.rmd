@@ -565,46 +565,43 @@ convert them into the array format expected by the `keras`
 software to match the specifications in `imagenet`. Make sure that your working directory in `R` is set to the folder in which the images are stored.
 
 ```{r}
-book_images_dataset <- dataset(
-  initialize = function(root, train = TRUE) {
-    fpath <- path.expand(file.path(root, "book_images.zip"))
-    
-    download.file(
-      url = "https://www.statlearning.com/s/book_images.zip", 
-      fpath
-    )
-    
-    unzip(fpath, exdir = path.expand(root))
-  }
-)
-
 img_dir <- "book_images"
 image_names <- list.files(img_dir)
 num_images <- length(image_names)
-x <- array(dim = c(num_images, 224, 224, 3))
+x <- torch_empty(num_images, 3, 224, 224)
 for (i in 1:num_images) {
-   img_path <- paste(img_dir, image_names[i], sep = "/")
-   img <- image_load(img_path, target_size = c(224, 224))
-   x[i,,, ] <- image_to_array(img)
+   img_path <- file.path(img_dir, image_names[i])
+   img <- img_path %>% 
+     base_loader() %>% 
+     transform_to_tensor() %>% 
+     transform_resize(c(224, 224)) %>% 
+     # normalize with imagenet mean and stds.
+     transform_normalize(
+       mean = c(0.485, 0.456, 0.406),
+       std = c(0.229, 0.224, 0.225)
+     )
+   x[i,,, ] <- img
 }
-x <- imagenet_preprocess_input(x)
 ```
 
-We then load the trained network. The model has 50 layers, with a fair bit of complexity.
+We then load the trained network. The model has 18 layers, with a fair bit of complexity.
 
 ```{r}
-model <- application_resnet50(weights = "imagenet")
-summary(model)
+model <- torchvision::model_resnet18(pretrained = TRUE)
+model$eval() # put the model in evaluation mode
 ```
 
 Finally, we classify our six images, and return the top three class
 choices in terms of predicted probability for each.
 
 ```{r}
-pred6 <- model %>% predict(x) %>%
-   imagenet_decode_predictions(top = 3)
-names(pred6) <- image_names
-print(pred6)
+preds <- model(x)
+
+mapping <- jsonlite::read_json("https://s3.amazonaws.com/deep-learning-models/image-models/imagenet_class_index.json") %>% 
+  sapply(function(x) x[[2]])
+
+preds_classes <- mapping[as.integer(torch_argmax(preds, dim = 2))]
+preds_classes
 ```
 
 ## IMDb Document Classification
