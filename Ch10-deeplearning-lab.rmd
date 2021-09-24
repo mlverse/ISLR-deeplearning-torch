@@ -694,6 +694,7 @@ We create a validation set of size 2,000, leaving 23,000 for training.
 ```{r}
 set.seed(3)
 ival <- sample(seq(along = train$y), 2000)
+itrain <- seq_along(train$y)[-ival]
 ```
 
 First we fit a lasso logistic regression model using `glmnet()`
@@ -709,7 +710,7 @@ dense format it would take about 5 minutes.
 
 ```{r}
 library(glmnet)
-fitlm <- glmnet(x_train_1h[-ival, ], unlist(y_train[-ival]),
+fitlm <- glmnet(x_train_1h[itrain, ], unlist(y_train[itrain]),
     family = "binomial", standardize = FALSE)
 classlmv <- predict(fitlm, x_train_1h[ival, ]) > 0
 acclmv <- apply(classlmv, 2, accuracy,  unlist(y_train[ival]) > 0)
@@ -731,29 +732,69 @@ Next we fit a fully-connected neural network with two hidden layers,
 each with 16 units and ReLU activation.
 
 ```{r}
-model <- keras_model_sequential() %>%
-   layer_dense(units = 16, activation = "relu",
-      input_shape = c(10000)) %>%
-   layer_dense(units = 16, activation = "relu") %>%
-   layer_dense(units = 1, activation = "sigmoid")
-model %>% compile(optimizer = "rmsprop",
-   loss = "binary_crossentropy", metrics = c("accuracy"))
-history <- model %>% fit(x_train_1h[-ival, ], y_train[-ival],
-   epochs = 20, batch_size = 512,
-   validation_data = list(x_train_1h[ival, ], y_train[ival]))
-    ```
+model <- nn_module(
+  initialize = function(input_size = 10000 + 3) {
+    self$dense1 <- nn_linear(input_size, 16)
+    self$relu <- nn_relu()
+    self$dense2 <- nn_linear(16, 16)
+    self$output <- nn_linear(16, 1)
+  },
+  forward = function(x) {
+    x %>% 
+      self$dense1() %>% 
+      self$relu() %>% 
+      self$dense2() %>% 
+      self$relu() %>% 
+      self$output() %>% 
+      torch_flatten(start_dim = 1)
+  }
+)
+model <- model %>% 
+  setup(
+    loss = nn_bce_with_logits_loss(),
+    optimizer = optim_rmsprop,
+    metrics = list(luz_metric_binary_accuracy_with_logits())
+  ) %>% 
+  set_opt_hparams(lr = 0.001)
+
+fitted <- model %>% 
+  fit(
+    # we transform the training a validation data into torch tensors
+    list(
+      torch_tensor(as.matrix(x_train_1h[itrain,]), dtype = torch_float()), 
+      torch_tensor(unlist(train$y[itrain]))
+    ),
+    valid_data = list(
+      torch_tensor(as.matrix(x_train_1h[ival, ]), dtype = torch_float()), 
+      torch_tensor(unlist(train$y[ival]))
+    ),
+    dataloader_options = list(batch_size = 512),
+    epochs = 10
+  )
+
+plot(fitted)  
+```
     
-The `history` object has a `metrics` component that
-records both the training and validation accuracy at each epoch.
+The `fitted` object has a `get_metrics` method that
+gets both the training and validation accuracy at each epoch.
 Figure ??? includes test accuracy at each epoch as well. To
 compute the test accuracy, we
 rerun the entire sequence above, replacing the last line with
 
 ```{r}
-history <- model %>% fit(
-    x_train_1h[-ival, ], y_train[-ival], epochs = 20,
-    batch_size = 512, validation_data = list(x_test_1h, y_test)
-    )
+fitted <- model %>% 
+  fit(
+    list(
+      torch_tensor(as.matrix(x_train_1h[itrain,]), dtype = torch_float()), 
+      torch_tensor(unlist(train$y[itrain]))
+    ),
+    valid_data = list(
+      torch_tensor(as.matrix(x_test_1h), dtype = torch_float()), 
+      torch_tensor(unlist(test$y))
+    ),
+    dataloader_options = list(batch_size = 512),
+    epochs = 10
+  )
 ```
 
 ## Recurrent Neural Networks
