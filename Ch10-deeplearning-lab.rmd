@@ -813,7 +813,7 @@ We first calculate the lengths of the documents.
 
 
 ```{r}
-wc <- sapply(x_train, length)
+wc <- sapply(seq_along(imdb_train), function(i) length(imdb_train[i]$x))
 median(wc)
 sum(wc <= 500) / length(wc)
 ```
@@ -822,15 +822,15 @@ We see that over 91% of the documents have fewer than 500 words. Our
 RNN requires all the document sequences to have the same length. We hence
 restrict the document lengths to the last $L=500$ words, and pad the
 beginning of the
-shorter ones with blanks.
+shorter ones with blanks. We will use torchdatasets functionality for this.
 
 ```{r}
 maxlen <- 500
-x_train <- pad_sequences(x_train, maxlen = maxlen)
-x_test <- pad_sequences(x_test, maxlen = maxlen)
-dim(x_train)
-dim(x_test)
-x_train[1, 490:500]
+num_words <- 10000
+imdb_train <- imdb_dataset(root = ".", split = "train", num_words = num_words,
+                           maxlen = maxlen)
+imdb_test <- imdb_dataset(root = ".", split = "test", num_words = num_words,
+                           maxlen = maxlen)
 ```
 
 
@@ -842,27 +842,47 @@ as a matrix of dimension $500 \times 10,000$, and then maps these
 $10,000$ dimensions down to $32$.
 
 ```{r}
-model <- keras_model_sequential() %>%
-   layer_embedding(input_dim = 10000, output_dim = 32) %>%
-   layer_lstm(units = 32) %>%
-   layer_dense(units = 1, activation = "sigmoid")
+model <- nn_module(
+  initialize = function() {
+    self$embedding <- nn_embedding(10000 + 3, 32)
+    self$lstm <- nn_lstm(input_size = 32, hidden_size = 32, batch_first = TRUE)
+    self$dense <- nn_linear(32, 1)
+  },
+  forward = function(x) {
+    c(output, c(hn, cn)) %<-% (x %>% 
+      self$embedding() %>% 
+      self$lstm())
+    output[,-1,] %>%  # get the last output
+      self$dense() %>% 
+      torch_flatten(start_dim = 1)
+  }
+)
 ```
 
 The second  layer is an LSTM with 32 units, and the output
-layer is a single sigmoid for the binary classification task.
 
+layer is a single logit for the binary classification task.
 The rest is now similar to other networks we have fit. We
 track the test performance as the network is fit, and see that it attains 87\% accuracy.
 
 ```{r}
-model %>% compile(optimizer = "rmsprop",
-    loss = "binary_crossentropy", metrics = c("acc"))
-#history <- model %>% fit(x_train, y_train, epochs = 10,
-history <- model %>% fit(x_train, y_train, epochs = 3,
-    batch_size = 128, validation_data = list(x_test, y_test))
-plot(history)
-predy <- predict(model, x_test) > 0.5
-mean(abs(y_test == as.numeric(predy)))
+model <- model %>% 
+  setup(
+    loss = nn_bce_with_logits_loss(),
+    optimizer = optim_rmsprop,
+    metrics = list(luz_metric_binary_accuracy_with_logits())
+  ) %>% 
+  set_opt_hparams(lr = 0.001)
+
+fitted <- model %>% fit(
+  imdb_train, 
+  epochs = 10,
+  dataloader_options = list(batch_size = 128),
+  valid_data = imdb_test
+)
+plot(fitted)
+predy <- torch_sigmoid(predict(fitted, imdb_test)) > 0.5
+evaluate(fitted, imdb_test, dataloader_options = list(batch_size = 512))
 ```
 
 ###  Time Series Prediction
