@@ -84,7 +84,9 @@ that describes the network.
 ```{r}
 library(torch)
 library(luz) # high-level interface for torch
-library(torchvision) # for datasets we are going to use
+library(torchvision) # for datasets and image transformation
+library(torchdatasets) # for datasets we are going to use
+library(zeallot)
 torch_manual_seed(13)
 ```
 
@@ -710,6 +712,8 @@ dense format it would take about 5 minutes.
 
 ```{r}
 library(glmnet)
+y_train <- unlist(train$y)
+
 fitlm <- glmnet(x_train_1h[itrain, ], unlist(y_train[itrain]),
     family = "binomial", standardize = FALSE)
 classlmv <- predict(fitlm, x_train_1h[ival, ]) > 0
@@ -987,21 +991,32 @@ expects.
 Now we are ready to proceed with the RNN, which uses 12 hidden units.
 
 ```{r}
-model <- keras_model_sequential() %>%
-   layer_simple_rnn(units = 12,
-      input_shape = list(5, 3),
-      dropout = 0.1, recurrent_dropout = 0.1) %>%
-   layer_dense(units = 1)
-model %>% compile(optimizer = optimizer_rmsprop(),
-    loss = "mse")
+model <- nn_module(
+  initialize = function() {
+    self$rnn <- nn_rnn(3, 12, batch_first = TRUE)
+    self$dense <- nn_linear(12, 1)
+    self$dropout <- nn_dropout(0.2)
+  },
+  forward = function(x) {
+    c(output, ...) %<-% (x %>% 
+      self$rnn())
+    output[,-1,] %>% 
+      self$dropout() %>% 
+      self$dense() %>% 
+      torch_flatten(start_dim = 1)
+  }
+)
+
+model <- model %>% 
+  setup(
+    optimizer = optim_rmsprop,
+    loss = nn_mse_loss()
+  ) %>% 
+  set_opt_hparams(lr = 0.001)
+
 ```
 
-We specify two forms of dropout for the units feeding into the  hidden
- layer. The first is for
-the input sequence feeding into this layer, and the second is for the
-previous hidden units feeding into the layer.
 The output layer has a single unit for the response.
-
 
 We  fit the model in a similar fashion to previous networks. We
 supply the `fit` function with test data as validation data, so that when
@@ -1011,28 +1026,35 @@ early stopping, since then the test performance would be biased.
 
 
 ```{r}
-history <- model %>% fit(
-    xrnn[istrain,, ], arframe[istrain, "log_volume"],
-#    batch_size = 64, epochs = 200,
-    batch_size = 64, epochs = 75,
-    validation_data =
+fitted <- model %>% fit(
+    list(xrnn[istrain,, ], arframe[istrain, "log_volume"]),
+    epochs = 75, #epochs = 200,
+    dataloader_options = list(batch_size = 64),
+    valid_data =
       list(xrnn[!istrain,, ], arframe[!istrain, "log_volume"])
   )
-kpred <- predict(model, xrnn[!istrain,, ])
+kpred <- as.numeric(predict(fitted, xrnn[!istrain,, ]))
 1 - mean((kpred - arframe[!istrain, "log_volume"])^2) / V0
 ```
 
 This model takes about one minute to train.
 
-We could replace the  `keras_model_sequential()`  command above with the following command:
+We could replace the  `nn_module`  command above with the following command:
 
 ```{r}
-model <- keras_model_sequential() %>%
-   layer_flatten(input_shape = c(5, 3)) %>%
-   layer_dense(units = 1)
+model <- nn_module(
+  initialize = function() {
+    self$dense <- nn_linear(15, 1)
+  },
+  forward = function(x) {
+    x %>% 
+      torch_flatten(start_dim = 2) %>% 
+      self$dense()
+  }
+)
 ```
 
-Here, `layer_flatten()` simply takes the input sequence and
+Here, `torch_flatten()` simply takes the input sequence and
 turns it into a long vector of predictors. This results in a linear AR model.
 To fit a nonlinear AR model, we could add in a hidden layer.
 
@@ -1054,20 +1076,39 @@ factor (there are five trading days), and the
 The rest of the steps to fit a nonlinear AR model should by now be familiar.
 
 ```{r}
-arnnd <- keras_model_sequential() %>%
-   layer_dense(units = 32, activation = 'relu',
-      input_shape = ncol(x)) %>%
-   layer_dropout(rate = 0.5) %>%
-   layer_dense(units = 1)
-arnnd %>% compile(loss = "mse",
-    optimizer = optimizer_rmsprop())
-history <- arnnd %>% fit(
-#    x[istrain, ], arframe[istrain, "log_volume"], epochs = 100, 
-    x[istrain, ], arframe[istrain, "log_volume"], epochs = 30, 
-    batch_size = 32, validation_data =
-      list(x[!istrain, ], arframe[!istrain, "log_volume"])
+arnnd <- nn_module(
+  initialize = function() {
+    self$dense <- nn_linear(15, 32)
+    self$dropout <- nn_dropout(0.5)
+    self$activation <- nn_relu()
+    self$output <- nn_linear(32, 1)
+    
+  },
+  forward = function(x) {
+    x %>% 
+      torch_flatten(start_dim = 2) %>% 
+      self$dense() %>% 
+      self$activation() %>% 
+      self$dropout() %>% 
+      self$output() %>% 
+      torch_flatten(start_dim = 1)
+  }
+)
+arnnd <- arnnd %>% 
+  setup(
+    optimizer = optim_rmsprop,
+    loss = nn_mse_loss()
+  ) %>% 
+  set_opt_hparams(lr = 0.001)
+
+fitted <- arnnd %>% fit(
+    list(xrnn[istrain,, ], arframe[istrain, "log_volume"]),
+    epochs = 30, #epochs = 200,
+    dataloader_options = list(batch_size = 64),
+    valid_data =
+      list(xrnn[!istrain,, ], arframe[!istrain, "log_volume"])
   )
-plot(history)
-npred <- predict(arnnd, x[!istrain, ])
+plot(fitted)
+npred <- as.numeric(predict(fitted, xrnn[!istrain, ,]))
 1 - mean((arframe[!istrain, "log_volume"] - npred)^2) / V0
 ```
