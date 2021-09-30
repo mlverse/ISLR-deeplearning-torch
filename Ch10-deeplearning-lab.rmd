@@ -144,7 +144,7 @@ modnn <- modnn %>%
   setup(
     loss = nn_mse_loss(),
     optimizer = optim_rmsprop,
-    metrics = list(luz_metric_mse())
+    metrics = list(luz_metric_mae())
   ) %>% 
   set_hparams(input_size = ncol(x))
 ```
