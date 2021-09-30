@@ -18,13 +18,7 @@ jupyter:
 
 In this section, we show how to fit the examples discussed in the text. We use the `luz` package, which interfaces to the
 `torch` package which in turn links to efficient
-`C++` code in the LibTorch library. This code is
-impressively fast, and the package is well-structured. A good companion
-is the text **Deep Learning with R**
-(F. Chollet and
-  J.J. Allaire, \emph{Deep Learning with R}
-  (2018), Manning Publications,) and most of our code is adapted from
-there.
+`C++` code in the LibTorch library. 
 
 ## Single Layer Network on Hitters Data
 
@@ -108,9 +102,9 @@ modnn <- nn_module(
 )
 ```
 
-We have create a model called `modnn` by defining the `initialize` and `forward` functions and passing them to the `nn_module()` function. The `initialize` function is responsible for initializing the submodules that are used by the model. In the `forward` method we implement what happens when call that model with observations. In this case we use the layers we defined in `initialize` in that specific order.
+We have create a model called `modnn` by defining the `initialize()` and `forward()` functions and passing them to the `nn_module()` function. The `initialize()` function is responsible for initializing the submodules that are used by the model. In the `forward` method we implement what happens when the model is called on input data. In this case we use the layers we defined in `initialize()` in that specific order.
 
-`self` is a list-like special object that is is used to share information between the methods of the `nn_module`. When you assign an object to `self` in `initialize`, it can then be accessed by `forward`.
+`self` is a list-like special object that is used to share information between the methods of the `nn_module()`. When you assign an object to `self` in `initialize()`, it can then be accessed by `forward()`.
 
 The `pipe` operator `%>%`
  passes the previous term as the first argument to the next
@@ -156,9 +150,9 @@ modnn <- modnn %>%
 ```
 
 In the previous line, the pipe operator passes `modnn` as the first argument to `setup()`. 
-The `setup()` function emmbeds these specification into a new model object. 
-We also use the `set_hparam` to specify the arguments that should be passed to the 
-`initialize` method of `modnn`. 
+The `setup()` function embeds these specification into a new model object. 
+We also use `set_hparam()` to specify the arguments that should be passed to the 
+`initialize()` method of `modnn`. 
 
 Now we fit the model. We supply the training data and the number of `epochs`. By default,
 at each step of SGD, the algorithm randomly selects 32 training observations for 
@@ -184,7 +178,7 @@ fitted <- modnn %>%
 *(Here and elsewhere we have reduced the number of epochs to make
     runtimes manageable; users can of course change back)*
 
-We can plot the `fiited` model to display the mean absolute error for the training and test data. 
+We can plot the `fitted` model to display the mean absolute error for the training and test data. 
 
 ```{r}
 plot(fitted)
@@ -205,9 +199,8 @@ The `torchvision` package comes with a number of example datasets,
 including the `MNIST` digit data. Our first step is to load the
 `MNIST` data. The `mnist_dataset()` function is provided for this purpose.
 
-This functions returns a `dataset`, a data structure implemented in `torch`
-allowing to represent any dataset without making assumptions on where and
-how the data is organized. Usually, torch datasets also implement the 
+This functions returns a `dataset()`, a data structure implemented in `torch`
+allowing to represent any dataset without making assumptions on where the data is stored and how the data is organized. Usually, torch datasets also implement the 
 data acquisition process, like downloading and caching some files on disk.
 
 ```{r}
@@ -221,7 +214,7 @@ length(train_ds)
 length(test_ds)
 ```
 
-There are 60,000 images in the training data and 10,000 in the test data. The images are $28\times 28$, and stored as matrix of pixels and we need to transform each one into a vector.  
+There are 60,000 images in the training data and 10,000 in the test data. The images are $28\times 28$, and stored as matrix of pixels. We need to transform each one into a vector.  
 
 Neural networks are somewhat sensitive to the scale of the inputs. For example, ridge and
 lasso regularization are affected by scaling.  Here the inputs are eight-bit
@@ -230,7 +223,7 @@ is to start at $0$, the possible values  range from $0$ to $255$.)
 grayscale values between 0 and 255, so we rescale to the unit
 interval.
 
-To make this transformations we will re-define `train_ds` and `test_ds` but now passing the `transform` argument that will apply a transformation for each of
+To apply these transformations we will re-define `train_ds` and `test_ds`, now passing a the `transform` argument that will apply a transformation to each of
 the image inputs.
 
 ```{r}
@@ -284,19 +277,19 @@ modelnn <- nn_module(
 )
 ```
 
-We define the `intialize` and `forward` methods of the `nn_module()`.
+We define the `intialize()` and `forward()` methods of the `nn_module()`.
 
 In `initialize` we specify all layers that are used in the model.
-For example `nn_linear(784, 256)` defines a dense layer that goes from
+For example, `nn_linear(784, 256)` defines a dense layer that goes from
 $28\times28=784$ input units to a hidden layer of $256$ units. The model
-will have 3 of them, each one descreasing the number of output units. The last,
-will have 10 output units, because each unit will be associtated to a different
-class and we have a 10-class classification problem.
-We also defined dropout layers using `nn_dropout()` that will be used
+will have 3 of them, each one decreasing the number of output units. The last
+will have 10 output units, because each unit will be associated to a different
+class, and we have a 10-class classification problem.
+We also defined dropout layers using `nn_dropout()`. These will be used
 to perform dropout regularization. And finally we define the activation
 layer using `nn_relu()`.
 
-In `forward` we define the order that these layers are called. We call them in blocks like (linear, activation, dropout) except from the last layer that we don't
+In `forward()` we define the order in which these layers are called. We call them in blocks like (linear, activation, dropout), except from the last layer that does not
 use an activation function or dropout.
 
 Finally, we use `print` to summarize the model, and to make sure we got it
@@ -313,8 +306,7 @@ layer involves $(784+1)\times 256=200{,}960$ parameters.
 Next, we add details to the model to specify the fitting algorithm. We fit the model by minimizing the cross-entropy function given by (10.13).
 
 Notice that in `torch` the cross entropy function is defined in terms of 
-the logits for numerical stability reasons and for memory efficiency reasons
-it doesn't require the target to be one hot encoded.
+the logits, for numerical stability and memory efficiency reasons. It does not require the target to be one hot encoded.
 
 ```{r}
 modelnn <- modelnn %>% 
@@ -341,12 +333,12 @@ system.time(
 plot(fitted)
 ```
 
-We have suppressed the output here, which is a progress report on the
+We have suppressed the output here. The output is a progress report on the
 fitting of the model, grouped by epoch. This is very useful, since on
 large datasets fitting can take time. Fitting this model took 215
 seconds on a 2.7GHz MacBook Pro with 4 cores and 16 GB of RAM.
 Here we specified a
-validation split of 20%, so the training is actually performed on
+validation split of 20%, so training is actually performed on
 80% of the 60,000 observations in the training set. This is an
 alternative to actually supplying validation data, like we did in
 Section 10.9.1. See
@@ -363,7 +355,7 @@ class labels, and then use it to evaluate our predictions.
 accuracy <- function(pred, truth) {
    mean(pred == truth) }
 
-# get's the true classes from all observations in test_ds.
+# gets the true classes from all observations in test_ds.
 truth <- sapply(seq_along(test_ds), function(x) test_ds[x][[2]])
 
 fitted %>% 
@@ -415,7 +407,7 @@ fit_modellr %>%
 
 
 # alternatively one can use the `evaluate` function to get the results
-# in the test_ds
+# on the test_ds
 evaluate(fit_modellr, test_ds)
 ```
 
@@ -446,10 +438,10 @@ str(train_ds[1])
 length(train_ds)
 ```
 
-The CIFAR dataset consists of 50,000 training images each represented by a 3d tensor:
+The CIFAR dataset consists of 50,000 training images, each represented by a 3d tensor:
 each three-color image is represented as a set of three channels, each of which consists of
 $32\times 32$ eight-bit pixels. We standardize as we did for the
-digits, but keep the array structure, this is accomplished with the `transform` argument.
+digits, but keep the array structure. This is accomplished with the `transform` argument.
 
 Before we start, we look at some of the training images; similar code produced
 Figure 10.5 on page 411.
@@ -511,7 +503,7 @@ model()
 ```
 
 Notice that we used the `padding = "same"` argument to
-`nn_conv2d`, which ensures that the output channels have the
+`nn_conv2d()`, which ensures that the output channels have the
 same dimension as the input channels. There are 32 channels in the first
 hidden layer, in contrast to the three channels in the input layer. We
 use a $3\times 3$ convolution filter for each channel in all the layers. Each
@@ -524,7 +516,7 @@ flattened to a dense layer of size 1,024:
 in other words, each of the $2\times 2$ matrices is turned into a
 $4$-vector, and put side-by-side in one layer. This is followed by a
 dropout regularization layer,  then
-another dense layer of size 512, which finally reaches
+another dense layer of size 512, and finally, the
 output layer.
 
 Finally, we specify the fitting algorithm, and fit the model.
@@ -563,7 +555,7 @@ We copied six jpeg images from a digital photo album into the
 directory `book_images`. (These images are available
   from the data section of  [www.statlearning.com](www.statlearning.com), the ISL book website. Download `book_images.zip`; when
 clicked it creates the `book_images` directory.) We first read in the images, and
-convert them into the array format expected by the `keras`
+convert them into the array format expected by the `torch`
 software to match the specifications in `imagenet`. Make sure that your working directory in `R` is set to the folder in which the images are stored.
 
 ```{r}
@@ -763,7 +755,7 @@ model <- model %>%
 
 fitted <- model %>% 
   fit(
-    # we transform the training a validation data into torch tensors
+    # we transform the training and validation data into torch tensors
     list(
       torch_tensor(as.matrix(x_train_1h[itrain,]), dtype = torch_float()), 
       torch_tensor(unlist(train$y[itrain]))
@@ -826,7 +818,7 @@ We see that over 91% of the documents have fewer than 500 words. Our
 RNN requires all the document sequences to have the same length. We hence
 restrict the document lengths to the last $L=500$ words, and pad the
 beginning of the
-shorter ones with blanks. We will use torchdatasets functionality for this.
+shorter ones with blanks. We will use `torchdatasets` functionality for this.
 
 ```{r}
 maxlen <- 500
@@ -985,7 +977,7 @@ dimension attribute, since the new array is filled column wise. The
 third step reverses the order of lagged variables, so that index $1$
 is furthest back in time, and index $5$ closest. The
 final step rearranges the coordinates of the array (like a partial
-transpose) into the format that the RNN module in `keras`
+transpose) into the format that the RNN module in `torch`
 expects.
 
 Now we are ready to proceed with the RNN, which uses 12 hidden units.
@@ -1039,7 +1031,7 @@ kpred <- as.numeric(predict(fitted, xrnn[!istrain,, ]))
 
 This model takes about one minute to train.
 
-We could replace the  `nn_module`  command above with the following command:
+We could replace the  `nn_module()`  command above with the following command:
 
 ```{r}
 model <- nn_module(
