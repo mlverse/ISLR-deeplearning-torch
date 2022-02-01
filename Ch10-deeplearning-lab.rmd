@@ -20,6 +20,13 @@ In this section, we show how to fit the examples discussed in the text. We use t
 `torch` package which in turn links to efficient
 `C++` code in the LibTorch library. 
 
+This version of the lab was produced by Daniel Falbel and Sigrid
+Keydana, both data scientists at **Rstudio** where these packages were
+produced.
+
+An advantage over our original `keras` implementation is that this
+version does not require a separate `python` installation.
+
 ## Single Layer Network on Hitters Data
 
 We start by fitting the models in Section 10.6.
@@ -102,7 +109,7 @@ modnn <- nn_module(
 )
 ```
 
-We have create a model called `modnn` by defining the `initialize()` and `forward()` functions and passing them to the `nn_module()` function. The `initialize()` function is responsible for initializing the submodules that are used by the model. In the `forward` method we implement what happens when the model is called on input data. In this case we use the layers we defined in `initialize()` in that specific order.
+We have created a model called `modnn` by defining the `initialize()` and `forward()` functions and passing them to the `nn_module()` function. The `initialize()` function is responsible for initializing the submodules that are used by the model. In the `forward` method we implement what happens when the model is called on input data. In this case we use the layers we defined in `initialize()` in that specific order.
 
 `self` is a list-like special object that is used to share information between the methods of the `nn_module()`. When you assign an object to `self` in `initialize()`, it can then be accessed by `forward()`.
 
@@ -116,7 +123,7 @@ We illustrate the use of the pipe operator on a simple example. Earlier, we crea
 x <- scale(model.matrix(Salary ~ . - 1, data = Gitters))
 ```
 
-We first make a matrix, and then we center each of the variables.
+We first make a matrix, and then we center and scale each of the variables.
 Compound expressions like this can be difficult to parse. We could have obtained the same result using the pipe operator:
 
 ```{r}
@@ -200,7 +207,7 @@ including the `MNIST` digit data. Our first step is to load the
 `MNIST` data. The `mnist_dataset()` function is provided for this purpose.
 
 This functions returns a `dataset()`, a data structure implemented in `torch`
-allowing to represent any dataset without making assumptions on where the data is stored and how the data is organized. Usually, torch datasets also implement the 
+allowing one to represent any dataset without making assumptions on where the data is stored and how the data is organized. Usually, torch datasets also implement the 
 data acquisition process, like downloading and caching some files on disk.
 
 ```{r}
@@ -218,10 +225,9 @@ There are 60,000 images in the training data and 10,000 in the test data. The im
 
 Neural networks are somewhat sensitive to the scale of the inputs. For example, ridge and
 lasso regularization are affected by scaling.  Here the inputs are eight-bit
-(Note: Eight bits means $2^8$, which equals 256. Since the convention
-is to start at $0$, the possible values  range from $0$ to $255$.)
 grayscale values between 0 and 255, so we rescale to the unit
-interval.
+interval. (Note: eight bits means $2^8$, which equals 256. Since the convention
+is to start at $0$, the possible values  range from $0$ to $255$.)
 
 To apply these transformations we will re-define `train_ds` and `test_ds`, now passing a the `transform` argument that will apply a transformation to each of
 the image inputs.
@@ -286,10 +292,10 @@ will have 3 of them, each one decreasing the number of output units. The last
 will have 10 output units, because each unit will be associated to a different
 class, and we have a 10-class classification problem.
 We also defined dropout layers using `nn_dropout()`. These will be used
-to perform dropout regularization. And finally we define the activation
+to perform dropout regularization. Finally we define the activation
 layer using `nn_relu()`.
 
-In `forward()` we define the order in which these layers are called. We call them in blocks like (linear, activation, dropout), except from the last layer that does not
+In `forward()` we define the order in which these layers are called. We call them in blocks like (linear, activation, dropout), except for the last layer that does not
 use an activation function or dropout.
 
 Finally, we use `print` to summarize the model, and to make sure we got it
@@ -306,7 +312,7 @@ layer involves $(784+1)\times 256=200{,}960$ parameters.
 Next, we add details to the model to specify the fitting algorithm. We fit the model by minimizing the cross-entropy function given by (10.13).
 
 Notice that in `torch` the cross entropy function is defined in terms of 
-the logits, for numerical stability and memory efficiency reasons. It does not require the target to be one hot encoded.
+the logits, for numerical stability and memory efficiency reasons. It does not require the target to be one-hot encoded.
 
 ```{r}
 modelnn <- modelnn %>% 
@@ -550,10 +556,10 @@ fiddling with regularization, and time to achieve such results.
 ## Using Pretrained CNN Models
 
 We now show how to use a CNN pretrained on the  `imagenet` database to classify natural
-images, and demonstrate how we produced Figure ???.
+images, and demonstrate how we produced Figure 10.10.
 We copied six jpeg images from a digital photo album into the
 directory `book_images`. (These images are available
-  from the data section of  [www.statlearning.com](www.statlearning.com), the ISL book website. Download `book_images.zip`; when
+  from the data section of  [www.statlearning.com](www.statlearning.com), the ISLR book website. Download `book_images.zip`; when
 clicked it creates the `book_images` directory.) We first read in the images, and
 convert them into the array format expected by the `torch`
 software to match the specifications in `imagenet`. Make sure that your working directory in `R` is set to the folder in which the images are stored.
@@ -594,13 +600,28 @@ preds <- model(x)
 mapping <- jsonlite::read_json("https://s3.amazonaws.com/deep-learning-models/image-models/imagenet_class_index.json") %>% 
   sapply(function(x) x[[2]])
 
-preds_classes <- mapping[as.integer(torch_argmax(preds, dim = 2))]
-preds_classes
+top3 <- torch_topk(preds, dim = 2, k = 3)
+
+top3_prob <- top3[[1]] %>% 
+  nnf_softmax(dim = 2) %>% 
+  torch_unbind() %>% 
+  lapply(as.numeric)
+
+top3_class <- top3[[2]] %>% 
+  torch_unbind() %>% 
+  lapply(function(x) mapping[as.integer(x)])
+
+result <- purrr::map2(top3_prob, top3_class, function(pr, cl) {
+  names(pr) <- cl
+  pr
+})
+names(result) <- image_names
+print(result)
 ```
 
 ## IMDb Document Classification
 
-Now we perform document classification (Section ???) on the `IMDB` dataset, which is available as part of the `torchdatasets`
+Now we perform document classification (Section 10.4) on the `IMDB` dataset, which is available as part of the `torchdatasets`
 package. We  limit the dictionary size to the
 10,000  most frequently-used words and tokens.
 
@@ -622,7 +643,7 @@ Each element of `imdb_train` is a vector of numbers between 1 and
 10000 (the document), referring to the words found in the dictionary.
 For example, the first training document is the positive review on
 page  419. The indices of the first 12 words are given below.
-\
+
 
 ```{r}
 imdb_train[1]$x[1:12]
@@ -773,7 +794,7 @@ plot(fitted)
     
 The `fitted` object has a `get_metrics` method that
 gets both the training and validation accuracy at each epoch.
-Figure ??? includes test accuracy at each epoch as well. To
+Figure 10.11 includes test accuracy at each epoch as well. To
 compute the test accuracy, we
 rerun the entire sequence above, replacing the last line with
 
@@ -827,6 +848,9 @@ imdb_train <- imdb_dataset(root = ".", split = "train", num_words = num_words,
                            maxlen = maxlen)
 imdb_test <- imdb_dataset(root = ".", split = "test", num_words = num_words,
                            maxlen = maxlen)
+
+vocab <- c(rep(NA, imdb_train$index_from - 1), imdb_train$get_vocabulary())
+tail(names(vocab)[imdb_train[1]$x])
 ```
 
 
@@ -856,7 +880,6 @@ model <- nn_module(
 ```
 
 The second  layer is an LSTM with 32 units, and the output
-
 layer is a single logit for the binary classification task.
 The rest is now similar to other networks we have fit. We
 track the test performance as the network is fit, and see that it attains 87\% accuracy.
@@ -883,7 +906,7 @@ evaluate(fitted, imdb_test, dataloader_options = list(batch_size = 512))
 
 ###  Time Series Prediction
 
-We now show how to fit the models in Section ???
+We now show how to fit the models in Section 10.5.2
 for  time series prediction.
 We first set up the data, and standardize each of the variables.
 
