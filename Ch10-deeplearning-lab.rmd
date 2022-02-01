@@ -848,6 +848,9 @@ imdb_train <- imdb_dataset(root = ".", split = "train", num_words = num_words,
                            maxlen = maxlen)
 imdb_test <- imdb_dataset(root = ".", split = "test", num_words = num_words,
                            maxlen = maxlen)
+
+vocab <- c(rep(NA, imdb_train$index_from - 1), imdb_train$get_vocabulary())
+tail(names(vocab)[imdb_train[1]$x])
 ```
 
 
