@@ -600,8 +600,23 @@ preds <- model(x)
 mapping <- jsonlite::read_json("https://s3.amazonaws.com/deep-learning-models/image-models/imagenet_class_index.json") %>% 
   sapply(function(x) x[[2]])
 
-preds_classes <- mapping[as.integer(torch_argmax(preds, dim = 2))]
-preds_classes
+top3 <- torch_topk(preds, dim = 2, k = 3)
+
+top3_prob <- top3[[1]] %>% 
+  nnf_softmax(dim = 2) %>% 
+  torch_unbind() %>% 
+  lapply(as.numeric)
+
+top3_class <- top3[[2]] %>% 
+  torch_unbind() %>% 
+  lapply(function(x) mapping[as.integer(x)])
+
+result <- purrr::map2(top3_prob, top3_class, function(pr, cl) {
+  names(pr) <- cl
+  pr
+})
+names(result) <- image_names
+print(result)
 ```
 
 ## IMDb Document Classification
@@ -628,7 +643,7 @@ Each element of `imdb_train` is a vector of numbers between 1 and
 10000 (the document), referring to the words found in the dictionary.
 For example, the first training document is the positive review on
 page  419. The indices of the first 12 words are given below.
-\
+
 
 ```{r}
 imdb_train[1]$x[1:12]
