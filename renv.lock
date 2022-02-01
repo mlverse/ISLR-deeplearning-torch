@@ -501,10 +501,10 @@
     },
     "torchvision": {
       "Package": "torchvision",
-      "Version": "0.4.0",
+      "Version": "0.4.1",
       "Source": "Repository",
       "Repository": "CRAN",
-      "Hash": "27e24146f18f5058285089e983b42d54"
+      "Hash": "a9b1ed6debed3ab81f27b74a71aee438"
     },
     "utf8": {
       "Package": "utf8",
